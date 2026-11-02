@@ -2,11 +2,11 @@
 
 ## 范围与来源
 
-期货请求1969–2025，原文1970-01至2011-09，Proposal2000–2025；实际历史一般更短。WRDS tr_ds_fut.wrds_fut_contract + wrds_contract_info。按configs/commodity_map.csv的contrcode映射，不按可能重码的ticker。BO/RR按固定priority选择系列；原Propane未找到、CAD Western barley身份未核实，候选不进入有效收益。旧Lumber不接2022新版，HU/RB分开，HO/ULSD规格差异保留。
+期货请求1969–2025，原文1970-01至2011-09，Proposal2000–2025；实际历史一般更短。WRDS tr_ds_fut.wrds_fut_contract + wrds_contract_info。按configs/commodity_map.csv的contrcode映射，不按可能重码的ticker。BO/RR按固定priority选择系列。WRDS contrcode 3160 明确标为 WESTERN BARLEY、CAD、metric tonne，且覆盖作者1994-07至2003-05样本，故纳入有效收益。原Propane作者样本为1987-09至2006-10；WRDS可识别候选均为2007年后OPIS/Argus掉期或更晚电子合约，不作替代。旧Lumber不接2022新版，HU/RB分开，HO/ULSD规格差异保留。
 
 ## Table Internet-I 日期惯例
 
-统一对所有合约计算，不只填vendor缺失，原日期字段保留用于审计。谷物、油籽和金属等按前月最后营业日；可可/咖啡分别为交割月首个营业日前10/7个营业日；棉花/木材取15号，原油取前月25号；橙汁/糖取首个营业日。表中前两营业日取第1营业日，4–10日取4日，范围另一端保存为convention_range_end。两端版本此前均得到同样的10,373条原文重合收益和约30.55bp MAE，故不再保留重复面板。
+逐合约vendor firstnoticedate优先；Feeder cattle和Lean hogs等现金结算合约使用vendor lasttrddate。只有相应实际日期缺失时才回退Table Internet-I：谷物、油籽和金属等按前月最后营业日；可可/咖啡分别为交割月首个营业日前10/7个营业日；棉花/木材取15号，原油取前月25号；橙汁/糖取首个营业日。表中前两营业日取第1营业日，4–10日取4日，范围另一端保存为convention_range_end。notice_source和notice_is_exact逐笔披露；旧convention-only政策仅用于before/after审计。
 
 Feeder cattle按交割月最后星期四，Lean hogs按10日作为最后交易日惯例。营业日使用美国联邦假日代理，不是完整历史CME/ICE/加拿大交易所日历；表中usually/around无法唯一恢复真实FND。约某日直接取该日，不额外前移安全缓冲。
 

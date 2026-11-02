@@ -12,6 +12,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .ipynb_checkpoints/
+.vscode/
 build/
 dist/
 # Local reference documents (not part of code submission)

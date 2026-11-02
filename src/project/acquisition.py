@@ -20,8 +20,10 @@ SCHEMA = 'tr_ds_fut'
 def connect_wrds(pgpass=None):
     """libpq reads the password; never put credentials into a notebook output."""
     import psycopg2
-    path = Path(pgpass or os.environ.get('PGPASSFILE', Path.home() /
-                'AppData/Roaming/postgresql/pgpass.conf'))
+    default_pgpass = Path.home() / '.pgpass'
+    if not default_pgpass.exists():
+        default_pgpass = Path.home() / 'AppData/Roaming/postgresql/pgpass.conf'
+    path = Path(pgpass or os.environ.get('PGPASSFILE', default_pgpass))
     entries = [re.split(r'(?<!\\):', line) for line in path.read_text().splitlines()
                if line.strip() and not line.startswith('#')]
     entry = next((x for x in entries if len(x) == 5 and
@@ -68,9 +70,10 @@ def download_futures(conn, start=None, end=None, refresh=False):
     The query projects settlement fields only; identical projections are collapsed,
     while conflicting quotes survive for explicit downstream rejection.
     """
-    settings=load_config()
-    start=start or settings['sample']['download_start']
-    end=end or settings['sample']['proposed_wrds_end']
+    if start is None or end is None:
+        settings = load_config()
+        start = start or settings['sample']['download_start']
+        end = end or settings['sample']['proposed_wrds_end']
     mapping = pd.read_csv(ROOT / 'configs/commodity_map.csv')
     codes = sorted(int(x) for x in mapping.contrcode.dropna().unique())
     out = ROOT / 'data/raw/wrds_contracts' / f'{start}_{end}'

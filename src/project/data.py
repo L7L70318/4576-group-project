@@ -1,6 +1,9 @@
 """Monthly inputs. date labels the return month; formation_date labels entry."""
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
 from .paths import ROOT, load_config
 
 
@@ -16,12 +19,21 @@ def load_reference():
     return d[['paper_code','date','excess_return','slope']].sort_values(['paper_code','date'])
 
 
-def prepare_metadata(metadata, mapping):
+def prepare_metadata(metadata, mapping, prefer_actual_notice=True):
+    """Normalize contract metadata and derive the safe-holding cutoff.
+
+    Contract-specific vendor FND/LTD fields take precedence.  The published
+    Internet-I calendar convention is an explicit fallback, not a replacement
+    for verified historical dates.  ``prefer_actual_notice=False`` reproduces
+    the repository's former convention-only policy for audit comparisons.
+    """
     m = metadata.copy()
     for c in ['lasttrddate','expirationdate','firstnoticedate','startdate']:
         m[c] = pd.to_datetime(m[c], errors='coerce')
     m['expiry'] = m.expirationdate.fillna(m.lasttrddate)
-    m['expiry_source'] = np.where(m.expirationdate.notna(),'expirationdate','lasttrddate')
+    m['expiry_source'] = np.select(
+        [m.expirationdate.notna(), m.lasttrddate.notna()],
+        ['expirationdate', 'lasttrddate'], default='missing')
     def maturity(row):
         s = str(row.contrdate)
         if len(s)!=4 or not s.isdigit() or not 1<=int(s[:2])<=12:
@@ -40,18 +52,28 @@ def prepare_metadata(metadata, mapping):
     m['convention_date'] = pd.to_datetime([d[0] for d in dates])
     m['convention_range_end'] = pd.to_datetime(upper)
     m['convention_rule'] = [d[1] for d in dates]
-    m['notice_cutoff'] = m.convention_date
-    m['notice_source'] = 'table_I_convention_US_federal_calendar_proxy'
     missing_expiry=m.expiry.isna() & m.maturity.notna()
     m.loc[missing_expiry,'expiry']=m.loc[missing_expiry,'maturity']+pd.offsets.MonthEnd(0)
     m.loc[missing_expiry,'expiry_source']='delivery_month_end_assumption'
     cash=m.paper_code.isin(['FC','LH'])
-    m.loc[cash,'expiry']=m.loc[cash,'convention_date']
-    m.loc[cash,'expiry_source']='table_I_cash_last_trade_convention'
+    m['notice_cutoff'] = m.convention_date
+    m['notice_source'] = 'table_I_convention_US_federal_calendar_proxy'
+    if prefer_actual_notice:
+        exact_fnd = ~cash & m.firstnoticedate.notna()
+        m.loc[exact_fnd, 'notice_cutoff'] = m.loc[exact_fnd, 'firstnoticedate']
+        m.loc[exact_fnd, 'notice_source'] = 'vendor_firstnoticedate'
+
+        # Cash-settled contracts have no FND.  Their actual last trade date is
+        # the economically relevant hold-safety boundary.
+        exact_cash_ltd = cash & m.lasttrddate.notna()
+        m.loc[exact_cash_ltd, 'notice_cutoff'] = m.loc[exact_cash_ltd, 'lasttrddate']
+        m.loc[exact_cash_ltd, 'notice_source'] = 'vendor_lasttrddate_cash_settled'
+    m['notice_is_exact'] = m.notice_source.isin(
+        ['vendor_firstnoticedate', 'vendor_lasttrddate_cash_settled'])
     return m
 
 
-def monthly_snapshots(folder):
+def monthly_snapshots(folder, prefer_actual_notice=True):
     folder = Path(folder)
     mapping = pd.read_csv(ROOT / 'configs/commodity_map.csv')
     expected = {int(c) for c in mapping.contrcode.dropna()}
@@ -59,7 +81,9 @@ def monthly_snapshots(folder):
                  if p.with_suffix('.parquet.json').exists()}
     if expected-completed:
         raise ValueError(f'Incomplete raw download; rerun acquisition: {sorted(expected-completed)}')
-    meta = prepare_metadata(pd.read_parquet(folder / 'metadata.parquet'),mapping)
+    meta = prepare_metadata(
+        pd.read_parquet(folder / 'metadata.parquet'), mapping,
+        prefer_actual_notice=prefer_actual_notice)
     frames, audits = [], []
     for path in sorted(folder.glob('contrcode=*.parquet')):
         code = int(path.stem.split('=')[1])
@@ -105,13 +129,16 @@ def construct_monthly(snapshot, max_quote_age=None):
             front, second = q.iloc[0], q.iloc[1]
             row.update(front_futcode=int(front.futcode), second_futcode=int(second.futcode),
                        slope=np.log(second.settlement/front.settlement))
-            safe = q.iloc[1:]
+            safe = q.iloc[1:].copy()
+            safe['contract_rank'] = np.arange(2, len(safe) + 2)
             safe = safe[safe.notice_cutoff.gt(row['date']) & safe.expiry.gt(row['date'])]
             if len(safe):
                 chosen = safe.iloc[0]
                 row.update(selected_futcode=int(chosen.futcode),entry_price=chosen.settlement,
                            first_notice_date=chosen.firstnoticedate,notice_cutoff=chosen.notice_cutoff,
                            expiry=chosen.expiry,notice_source=chosen.notice_source,
+                           notice_is_exact=bool(chosen.notice_is_exact),
+                           selected_contract_rank=int(chosen.contract_rank),
                            entry_quote_date=chosen.quote_date,entry_open_interest=chosen.open_interest,
                            reason='selected')
             else:
@@ -158,14 +185,14 @@ def build_dataset(folder=None):
     out = ROOT / 'data/interim'; out.mkdir(parents=True,exist_ok=True)
     processed = ROOT / 'data/processed'; processed.mkdir(parents=True,exist_ok=True)
     snapshots, audit, metadata = monthly_snapshots(folder)
-    snapshots.to_parquet(out/f'wrds_month_end_contracts.parquet',index=False,compression='zstd')
-    metadata.to_parquet(out/f'wrds_metadata_clean.parquet',index=False,compression='zstd')
-    audit.to_csv(out/f'wrds_quote_audit.csv',index=False)
+    snapshots.to_parquet(out/'wrds_month_end_contracts.parquet',index=False,compression='zstd')
+    metadata.to_parquet(out/'wrds_metadata_clean.parquet',index=False,compression='zstd')
+    audit.to_csv(out/'wrds_quote_audit.csv',index=False)
     panel = construct_monthly(snapshots)
     panel = panel.merge(momentum_signal(panel),on=['paper_code','date'],how='left',validate='one_to_one')
-    panel['notice_policy'] = 'appendix_conventions'
-    panel.to_parquet(processed/f'commodity_monthly.parquet',index=False,compression='zstd')
+    panel['notice_policy'] = 'vendor_fnd_then_appendix_fallback'
+    panel.to_parquet(processed/'commodity_monthly.parquet',index=False,compression='zstd')
     panel[panel.date.between('2000-01-01','2025-12-31')].to_parquet(
-        processed/f'commodity_monthly_2000_2025.parquet',index=False,compression='zstd')
+        processed/'commodity_monthly_2000_2025.parquet',index=False,compression='zstd')
     load_reference().to_parquet(out/'author_monthly_reference.parquet',index=False,compression='zstd')
     return panel

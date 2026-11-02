@@ -1,5 +1,5 @@
 paper_code,commodity,sector,contrcode,priority,status,note
-LBR,Barley,agriculture,3160,1,candidate,Western barley CAD; historical market identity needs verification
+LBR,Barley,agriculture,3160,1,verified,WRDS WESTERN BARLEY; CAD metric tonne; coverage contains paper 1994-07 to 2003-05 sample
 CC,Cocoa,agriculture,1980,1,verified,USD US cocoa
 KC,Coffee,agriculture,2038,1,verified,USD coffee C
 C,Corn,agriculture,3247,1,verified,Composite corn

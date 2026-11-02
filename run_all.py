@@ -21,7 +21,8 @@ def main():
         from project.preparation import prepare_data
         prepare_data(download=not args.offline)
         return
-    parser.error('Pricing models are not implemented. Use --data-only (or notebooks 03-05).')
+    from project.models import replicate
+    replicate()
 
 if __name__ == "__main__":
     main()

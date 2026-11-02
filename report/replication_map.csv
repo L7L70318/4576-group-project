@@ -1,6 +1,8 @@
 paper_result,output,status
-Tables 1-2,results/replication/tables/descriptive.csv,pending
-Table 3,results/replication/tables/cross_section.csv,pending
+Tables 1-2,results/replication/carry_audit/published_vs_revised_table_1_2.csv,audited_not_matched
+Table 9,results/replication/carry_discrepancy/c5_leg_summary.csv,audited_not_matched
+Table 3,results/replication/asset_pricing/table3_published_vs_reconstructed.csv,reconstructed_not_matched
+Figure 2,results/replication/asset_pricing/figure2_realized_vs_fitted.png,reconstructed_not_matched
 Tables 6-7,results/replication/tables/time_series.csv,pending
 Tables 8 and 10,results/replication/tables/economic_sources.csv,pending
 Table 12,results/replication/tables/business_cycle.csv,pending
