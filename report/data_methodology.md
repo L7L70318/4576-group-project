@@ -22,7 +22,7 @@ Feeder cattle按交割月最后星期四，Lean hogs按10日作为最后交易�
 
 ## 组合
 
-按形成时可知状态选择成员。C1–C5分别要求负/正slope两侧足k，平坦曲线不进carry；P1/P2分负曲线、P3/P4分正曲线，M1–M5按动量两端，Q1–Q5五分位，另存AVG和四类Proposal行业组合。保存权重；未来退出收益缺失时不事后重新加权。CARRY不足一侧的处理和原文信号时点仍未完全匹配，不宣称定价表复现。
+按形成时可知状态选择成员。正式C1–C5按完整slope截面排序，分别做多最低k个、做空最高k个，不额外要求两侧跨过零；该口径与原文报告的501个月覆盖更一致。严格正负规则仅保留在diagnostics中。P1/P2分负曲线、P3/P4分正曲线，M1–M5按动量两端，Q1–Q5五分位，另存AVG和四类Proposal行业组合。保存权重；未来退出收益缺失时不事后重新加权。
 
 ## 辅助数据
 
@@ -38,8 +38,8 @@ FRED USREC/INDPRO/DTWEXBGS/TEDRATE/TB3MS/BAA/AAA是修订后快照，月末取�
 
 作者.xls实际为TSV，12,207行、29品种、501月、两处slope缺失，仅作benchmark。按同品种同月且两边收益非缺失配对，保存基点偏差/MAE/RMSE、逐行价格和合约、极端误差、日期±1月诊断。总体与逐品种均值/标准差/最小最大/分位数使用完全相同样本，百分比月收益未年化，合并不是组合收益。
 
-Internet-I核对覆盖，Internet-II 29行目标在configs/internet_II_targets.csv。作者N、年化均值/SD/SR匹配原表舍入；contango频率须把零计入(>=0)才能匹配，策略仍用严格正负。附件无OI和原始日价/合约ID，不能直接验证这些字段。Internet-III/GMM等属于后续估计，未实现。
+Internet-I核对覆盖，Internet-II 29行目标在configs/internet_II_targets.csv。作者N、年化均值/SD/SR匹配原表舍入；contango描述频率把零计入(>=0)，正式Carry则使用完整截面的bottom/top排名。附件无OI和原始日价/合约ID，不能直接验证这些字段。Table 3、Figure 2和Table 8由正式脚本生成。
 
 ## 重跑和存储
 
-四个notebook依次运行，测试在03/04；可复用逻辑在src，CLI `python run_all.py --data-only --offline`。raw含来源与SHA256 sidecar，data/interim/processed和results均可重建，Git忽略数据和结果。凭据只从外部pgpass读取。旧严格日期/月初下界/范围末端版本及探查缓存已清理，清理清单见cleanup_manifest.json。
+四个notebook用于检查；正式结果由src代码生成，完整CLI为`python run_all.py`，已有原始快照时可用`--offline`。raw含来源与SHA256 sidecar，data/interim/processed和results均可重建；原始数据不提交，复现表格和图片提交。凭据优先从外部pgpass读取，否则在终端安全交互输入，均不写入仓库。探索过程和清理记录保存在Git忽略的processing_exploration目录。

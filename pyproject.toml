@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ieor4576-commodity-risk"
 version = "0.1.0"
 description = "Replication of Bakshi, Gao and Rossi (2019)"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 dependencies = ["numpy", "pandas>=2.2", "pyarrow>=14", "scipy", "statsmodels", "matplotlib", "pyyaml", "wrds", "psycopg2-binary"]
 
 [project.optional-dependencies]

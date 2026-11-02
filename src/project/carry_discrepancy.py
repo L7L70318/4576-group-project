@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .data import construct_monthly, load_reference, monthly_snapshots
-from .paths import ROOT, load_config
+from .paths import PROCESSING_EXPLORATION, ROOT, load_config
 
 PAPER_START = pd.Timestamp("1970-01-31")
 PAPER_END = pd.Timestamp("2011-09-30")
@@ -332,7 +332,7 @@ def build_discrepancy_audit(folder=None):
         sample = load_config()["sample"]
         folder = ROOT / "data/raw/wrds_contracts" / (
             f"{sample['download_start']}_{sample['proposed_wrds_end']}")
-    out = ROOT / "results/replication/carry_discrepancy"
+    out = PROCESSING_EXPLORATION / "results" / "carry_discrepancy"
     out.mkdir(parents=True, exist_ok=True)
 
     snapshots, _, _ = monthly_snapshots(folder, prefer_actual_notice=True)

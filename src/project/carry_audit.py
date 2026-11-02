@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from .data import construct_monthly, momentum_signal, monthly_snapshots
-from .paths import ROOT, load_config
+from .paths import PROCESSING_EXPLORATION, ROOT, load_config
 from .portfolios import make_portfolios
 
 PAPER_START = pd.Timestamp("1970-01-31")
@@ -89,11 +89,7 @@ def return_statistics(returns: pd.DataFrame) -> pd.DataFrame:
 
 
 def compare_carry_policies(panel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Compare strict signs with two transparent non-baseline alternatives.
-
-    The alternatives are diagnostics only.  They are never substituted for the
-    baseline strict-sign C5 silently.
-    """
+    """Compare the primary rank rule with transparent sign-based diagnostics."""
     rows = []
     for date, group in panel.groupby("date", sort=True):
         universe = group
@@ -166,7 +162,7 @@ def build_audit(folder=None):
         settings = load_config()["sample"]
         folder = ROOT / "data/raw/wrds_contracts" / (
             f"{settings['download_start']}_{settings['proposed_wrds_end']}")
-    out = ROOT / "results/replication/carry_audit"
+    out = PROCESSING_EXPLORATION / "results" / "carry_audit"
     out.mkdir(parents=True, exist_ok=True)
 
     revised_snapshots, _, revised_meta = monthly_snapshots(folder, prefer_actual_notice=True)

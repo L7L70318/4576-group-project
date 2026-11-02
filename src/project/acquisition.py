@@ -1,6 +1,7 @@
 """Read-only WRDS acquisition with immutable, resumable Parquet snapshots."""
 from __future__ import annotations
 
+import getpass
 import hashlib
 import json
 import os
@@ -18,22 +19,49 @@ SCHEMA = 'tr_ds_fut'
 
 
 def connect_wrds(pgpass=None):
-    """libpq reads the password; never put credentials into a notebook output."""
+    """Open a read-only WRDS connection without persisting credentials.
+
+    A matching libpq password-file entry is used when available.  Otherwise the
+    username and password are requested interactively; the password is not
+    echoed or written to disk.
+    """
     import psycopg2
     default_pgpass = Path.home() / '.pgpass'
     if not default_pgpass.exists():
         default_pgpass = Path.home() / 'AppData/Roaming/postgresql/pgpass.conf'
     path = Path(pgpass or os.environ.get('PGPASSFILE', default_pgpass))
-    entries = [re.split(r'(?<!\\):', line) for line in path.read_text().splitlines()
-               if line.strip() and not line.startswith('#')]
+    entries = (
+        [
+            re.split(r'(?<!\\):', line)
+            for line in path.read_text().splitlines()
+            if line.strip() and not line.startswith('#')
+        ]
+        if path.is_file()
+        else []
+    )
     entry = next((x for x in entries if len(x) == 5 and
                   x[0] in ('wrds-pgdata.wharton.upenn.edu', '*') and
                   x[1] in ('9737', '*') and x[2] in ('wrds', '*')), None)
-    if entry is None:
-        raise ValueError('No matching WRDS entry in PGPASSFILE.')
-    conn = psycopg2.connect(host='wrds-pgdata.wharton.upenn.edu', port=9737,
-                           dbname='wrds', user=entry[3], passfile=str(path),
-                           sslmode='require', connect_timeout=25)
+    connection_kwargs = {
+        'host': 'wrds-pgdata.wharton.upenn.edu',
+        'port': 9737,
+        'dbname': 'wrds',
+        'sslmode': 'require',
+        'connect_timeout': 25,
+    }
+    if entry is not None:
+        connection_kwargs.update(user=entry[3], passfile=str(path))
+    else:
+        if not os.isatty(0):
+            raise RuntimeError(
+                'WRDS credentials are required. Run interactively or configure '
+                '~/.pgpass/PGPASSFILE; use --offline with cached raw data.'
+            )
+        username = input('WRDS username: ').strip()
+        if not username:
+            raise ValueError('WRDS username cannot be empty.')
+        connection_kwargs.update(user=username, password=getpass.getpass('WRDS password: '))
+    conn = psycopg2.connect(**connection_kwargs)
     conn.set_session(readonly=True, autocommit=True)
     with conn.cursor() as cur:
         cur.execute("SET statement_timeout = '600s'")

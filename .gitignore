@@ -1,7 +1,11 @@
 # Local data and generated artifacts
 data/
-results/
+results/*
+!results/README.md
+!results/replication/
+!results/replication/**
 tmp/
+processing_exploration/
 .env
 .env.*
 !.env.example

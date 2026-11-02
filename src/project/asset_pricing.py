@@ -11,7 +11,13 @@ from scipy import optimize, stats
 
 from .carry_discrepancy import apply_paper_windows, construct_carry
 from .data import construct_monthly, momentum_signal, monthly_snapshots
-from .paths import ROOT, load_config
+from .paths import (
+    PROCESSING_EXPLORATION,
+    REPLICATION_FIGURES,
+    REPLICATION_TABLES,
+    ROOT,
+    load_config,
+)
 from .portfolios import make_portfolios
 
 PAPER_START = pd.Timestamp("1970-01-31")
@@ -105,8 +111,8 @@ def _pvalues(estimates: np.ndarray, covariance: np.ndarray) -> np.ndarray:
 
 
 def construct_baseline_returns(panel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Construct the paper's 12 test assets and strict-sign baseline factors."""
-    returns, weights = make_portfolios(panel, carry_policy="strict")
+    """Construct the paper's 12 test assets and rank-based primary factors."""
+    returns, weights = make_portfolios(panel, carry_policy="rank")
     assets = returns[
         ["P1", "P2", "P3", "P4", "Q1", "Q2", "Q3", "Q4", "Q5",
          "sector_agriculture", "sector_livestock", "sector_metals"]
@@ -138,6 +144,28 @@ def coverage_table(frame: pd.DataFrame, kind: str) -> pd.DataFrame:
                 "start": values.index.min() if len(values) else pd.NaT,
                 "end": values.index.max() if len(values) else pd.NaT,
                 "annualized_mean_percent": values.mean() * 1200 if len(values) else np.nan,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def factor_summary_table(factors: pd.DataFrame) -> pd.DataFrame:
+    """Submission summary statistics for AVG, CARRY, and CMOM."""
+    rows = []
+    for factor in FACTORS:
+        values = factors[factor].dropna()
+        annualized_sd = values.std(ddof=1) * np.sqrt(12)
+        rows.append(
+            {
+                "factor": factor,
+                "n_months": len(values),
+                "start": values.index.min(),
+                "end": values.index.max(),
+                "annualized_mean_percent": values.mean() * 1200,
+                "annualized_sd_percent": annualized_sd * 100,
+                "annualized_sharpe": values.mean() * 12 / annualized_sd,
+                "monthly_skewness": values.skew(),
+                "positive_months_percent": values.gt(0).mean() * 100,
             }
         )
     return pd.DataFrame(rows)
@@ -251,30 +279,216 @@ def time_series_regressions(
     assets: pd.DataFrame, factors: pd.DataFrame, model: str
 ) -> pd.DataFrame:
     """Estimate first-pass alphas/betas with Newey-West inference."""
+    coefficients, _ = time_series_table(assets, factors, model)
+    parameter_columns = ["alpha", *[f"beta_{factor}" for factor in factors]]
+    rows = []
+    for result in coefficients.itertuples(index=False):
+        for parameter in parameter_columns:
+            rows.append(
+                {
+                    "model": model,
+                    "asset": result.asset,
+                    "parameter": parameter,
+                    "estimate_monthly": getattr(result, parameter),
+                    "nw_standard_error": getattr(result, f"{parameter}_nw_standard_error"),
+                    "nw_pvalue": getattr(result, f"{parameter}_nw_pvalue"),
+                    "n_months": result.n_months,
+                    "nw_lags": result.nw_lags,
+                    "adjusted_r2_percent": result.adjusted_r2_percent,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def time_series_table(
+    assets: pd.DataFrame, factors: pd.DataFrame, model: str
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build paper-style time-series results and the joint alpha test.
+
+    The joint test uses the HAC covariance of the stacked OLS intercept
+    influence functions, retaining contemporaneous and serial correlation
+    across all test-asset residuals.
+    """
     factor_values = factors.to_numpy(float)
     design = np.column_stack([np.ones(len(factors)), factor_values])
-    bread = np.linalg.pinv(design.T @ design / len(design))
+    nobs = len(design)
+    nparameters = design.shape[1]
+    nw_lags = automatic_nw_lags(nobs)
+    bread = np.linalg.pinv(design.T @ design / nobs)
     rows = []
+    residual_columns = []
+    alphas = []
     for asset in assets:
         values = assets[asset].to_numpy(float)
         estimates = np.linalg.lstsq(design, values, rcond=None)[0]
         residuals = values - design @ estimates
+        residual_columns.append(residuals)
+        alphas.append(estimates[0])
         scores = design * residuals[:, None]
-        covariance = bread @ long_run_covariance(scores) @ bread / len(design)
+        covariance = bread @ long_run_covariance(scores, nw_lags) @ bread / nobs
         standard_errors = np.sqrt(np.clip(np.diag(covariance), 0, None))
-        pvalues = 2 * stats.norm.sf(np.abs(estimates / standard_errors))
+        statistics = np.divide(
+            estimates,
+            standard_errors,
+            out=np.full_like(estimates, np.nan),
+            where=standard_errors > 0,
+        )
+        pvalues = 2 * stats.norm.sf(np.abs(statistics))
+        total_sum_squares = np.sum((values - values.mean()) ** 2)
+        residual_sum_squares = residuals @ residuals
+        adjusted_r2 = (
+            1 - (residual_sum_squares / (nobs - nparameters))
+            / (total_sum_squares / (nobs - 1))
+            if total_sum_squares > 0 and nobs > nparameters
+            else np.nan
+        )
+        row = {
+            "model": model,
+            "asset": asset,
+            "n_months": nobs,
+            "nw_lags": nw_lags,
+            "adjusted_r2_percent": adjusted_r2 * 100,
+        }
         for index, parameter in enumerate(["alpha", *[f"beta_{x}" for x in factors]]):
-            rows.append(
-                {
-                    "model": model,
-                    "asset": asset,
-                    "parameter": parameter,
-                    "estimate_monthly": estimates[index],
-                    "nw_standard_error": standard_errors[index],
-                    "nw_pvalue": pvalues[index],
+            row[parameter] = estimates[index]
+            row[f"{parameter}_nw_standard_error"] = standard_errors[index]
+            row[f"{parameter}_nw_pvalue"] = pvalues[index]
+        rows.append(row)
+
+    residual_matrix = np.column_stack(residual_columns)
+    alpha_influence = residual_matrix * (design @ bread[:, 0])[:, None]
+    alpha_covariance = long_run_covariance(alpha_influence, nw_lags) / nobs
+    alpha_values = np.asarray(alphas)
+    joint_alpha_chi2 = float(
+        alpha_values @ np.linalg.pinv(alpha_covariance) @ alpha_values
+    )
+    joint = pd.DataFrame(
+        [
+            {
+                "model": model,
+                "n_months": nobs,
+                "nw_lags": nw_lags,
+                "joint_alpha_chi2": joint_alpha_chi2,
+                "joint_alpha_df": len(alpha_values),
+                "joint_alpha_pvalue": stats.chi2.sf(
+                    joint_alpha_chi2, len(alpha_values)
+                ),
+            }
+        ]
+    )
+    return pd.DataFrame(rows), joint
+
+
+def table8_equity_volatility_results(
+    assets: pd.DataFrame,
+    factors: pd.DataFrame,
+    carry_returns: pd.DataFrame,
+    equity_volatility: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    """Reconstruct Table 8 with rank Carry and the 19-country equity-vol proxy."""
+    equity = equity_volatility.copy()
+    equity.index = pd.to_datetime(equity.index)
+    equity.index.name = "date"
+    delta_name = "DELTA_VOL_EQUITY"
+    delta = equity["delta_vol_equity_g20_proxy"].rename(delta_name)
+
+    panel_a_sample = pd.concat(
+        [
+            carry_returns[["C5", "C5_long", "C5_short"]].rename(
+                columns={
+                    "C5": "CARRY",
+                    "C5_long": "CARRY_LONG",
+                    "C5_short": "CARRY_SHORT",
                 }
-            )
-    return pd.DataFrame(rows)
+            ),
+            delta,
+            equity[["vol_equity_g20_proxy", "countries_mean", "countries_min", "days"]],
+        ],
+        axis=1,
+    ).dropna(subset=["CARRY", "CARRY_LONG", "CARRY_SHORT", delta_name])
+    panel_a, _ = time_series_table(
+        panel_a_sample[["CARRY", "CARRY_LONG", "CARRY_SHORT"]],
+        panel_a_sample[[delta_name]],
+        "rank_carry_on_equity_volatility_innovation",
+    )
+    panel_a.insert(0, "carry_policy", "unconditional_rank_bottom_top_5")
+
+    panel_b_sample = pd.concat(
+        [assets[["P1", "P2", "P3", "P4"]], factors[["AVG"]], delta, equity], axis=1
+    ).dropna(subset=["P1", "P2", "P3", "P4", "AVG", delta_name])
+    panel_b_assets = panel_b_sample[["P1", "P2", "P3", "P4"]]
+    panel_b_factors = panel_b_sample[["AVG", delta_name]]
+    fmb = fama_macbeth(panel_b_assets, panel_b_factors)
+    nw_pvalues = _pvalues(fmb.lambda_estimate, fmb.covariance_nw)
+    shanken_pvalues = _pvalues(fmb.lambda_estimate, fmb.covariance_shanken)
+    panel_b_model = pd.DataFrame(
+        [
+            {
+                "carry_policy": "unconditional_rank_bottom_top_5",
+                "equity_volatility_proxy": "19_country_g20_available_country_mean",
+                "n_months": len(panel_b_sample),
+                "start": panel_b_sample.index.min(),
+                "end": panel_b_sample.index.max(),
+                "nw_lags": fmb.nw_lags,
+                "lambda_AVG_monthly": fmb.lambda_estimate[0],
+                "lambda_AVG_nw_pvalue": nw_pvalues[0],
+                "lambda_AVG_shanken_pvalue": shanken_pvalues[0],
+                "lambda_DELTA_VOL_EQUITY_monthly": fmb.lambda_estimate[1],
+                "lambda_DELTA_VOL_EQUITY_nw_pvalue": nw_pvalues[1],
+                "lambda_DELTA_VOL_EQUITY_shanken_pvalue": shanken_pvalues[1],
+                "r2_ols_percent": fmb.r2_ols * 100,
+                "r2_gls_percent": fmb.r2_gls * 100,
+                "pricing_error_chi2_nw": fmb.chi2_nw,
+                "pricing_error_chi2_nw_pvalue": fmb.chi2_nw_pvalue,
+                "pricing_error_chi2_shanken": fmb.chi2_shanken,
+                "pricing_error_chi2_shanken_pvalue": fmb.chi2_shanken_pvalue,
+            }
+        ]
+    )
+    panel_b_pricing = pd.DataFrame(
+        {
+            "asset": panel_b_assets.columns,
+            "realized_monthly": panel_b_assets.mean().to_numpy(),
+            "fitted_monthly": fmb.fitted,
+            "pricing_error_monthly": fmb.pricing_errors,
+        }
+    )
+    panel_b_pricing.insert(0, "carry_policy", "unconditional_rank_bottom_top_5")
+    for column in ["realized_monthly", "fitted_monthly", "pricing_error_monthly"]:
+        panel_b_pricing[column.replace("_monthly", "_annualized_percent")] = (
+            panel_b_pricing[column] * 1200
+        )
+
+    sample_coverage = pd.DataFrame(
+        [
+            {
+                "panel": "A_time_series",
+                "n_months": len(panel_a_sample),
+                "start": panel_a_sample.index.min(),
+                "end": panel_a_sample.index.max(),
+                "countries_mean_average": panel_a_sample.countries_mean.mean(),
+                "countries_mean_minimum": panel_a_sample.countries_mean.min(),
+                "countries_mean_maximum": panel_a_sample.countries_mean.max(),
+            },
+            {
+                "panel": "B_cross_section",
+                "n_months": len(panel_b_sample),
+                "start": panel_b_sample.index.min(),
+                "end": panel_b_sample.index.max(),
+                "countries_mean_average": panel_b_sample.countries_mean.mean(),
+                "countries_mean_minimum": panel_b_sample.countries_mean.min(),
+                "countries_mean_maximum": panel_b_sample.countries_mean.max(),
+            },
+        ]
+    )
+    return {
+        "panel_a": panel_a,
+        "panel_a_sample": panel_a_sample,
+        "panel_b_model": panel_b_model,
+        "panel_b_pricing": panel_b_pricing,
+        "panel_b_sample": panel_b_sample,
+        "sample_coverage": sample_coverage,
+    }
 
 
 def fama_macbeth(assets: pd.DataFrame, factors: pd.DataFrame) -> FamaMacBethResult:
@@ -664,46 +878,98 @@ def _figure_two(
 
 
 def build_asset_pricing_replication(folder=None) -> dict[str, pd.DataFrame]:
-    """Run Phase 2 and save outputs separately from the data audit."""
+    """Build the Phase 1 cross-sectional and equity-volatility outputs."""
     if folder is None:
         sample = load_config()["sample"]
         folder = ROOT / "data/raw/wrds_contracts" / (
             f"{sample['download_start']}_{sample['proposed_wrds_end']}"
         )
-    output = ROOT / "results/replication/asset_pricing"
+    output = REPLICATION_TABLES / "asset_pricing"
+    figure_output = REPLICATION_FIGURES / "asset_pricing"
+    exploration_output = PROCESSING_EXPLORATION / "results" / "asset_pricing"
+    table8_exploration_output = (
+        PROCESSING_EXPLORATION / "results" / "equity_volatility"
+    )
+    diagnostic_output = exploration_output / "time_series_diagnostics"
     output.mkdir(parents=True, exist_ok=True)
+    figure_output.mkdir(parents=True, exist_ok=True)
+    exploration_output.mkdir(parents=True, exist_ok=True)
+    table8_exploration_output.mkdir(parents=True, exist_ok=True)
+    diagnostic_output.mkdir(parents=True, exist_ok=True)
 
     snapshots, _, _ = monthly_snapshots(folder, prefer_actual_notice=True)
     panel = construct_monthly(snapshots, max_quote_age=7)
     panel = panel[panel.date.between(PAPER_START, PAPER_END)]
     panel = apply_paper_windows(panel)
     assets, factors, weights = construct_baseline_returns(panel)
-    assets.to_csv(output / "monthly_test_asset_returns.csv")
-    factors.to_csv(output / "monthly_factor_returns_strict_sign.csv")
-    weights.to_csv(output / "monthly_portfolio_weights.csv", index=False)
+    assets.to_csv(exploration_output / "monthly_test_asset_returns.csv")
+    factors.to_csv(output / "monthly_factor_returns.csv")
+    factor_summary_table(factors).to_csv(
+        output / "three_factor_summary_statistics.csv", index=False
+    )
+    weights.to_csv(exploration_output / "monthly_portfolio_weights.csv", index=False)
     weight_validation, sorting_validation = construction_validation(panel, weights)
-    weight_validation.to_csv(output / "portfolio_weight_validation.csv", index=False)
-    sorting_validation.to_csv(output / "sorting_validation_summary.csv", index=False)
+    weight_validation.to_csv(
+        exploration_output / "portfolio_weight_validation.csv", index=False
+    )
+    sorting_validation.to_csv(
+        exploration_output / "sorting_validation_summary.csv", index=False
+    )
 
     rank_carry, _ = construct_carry(panel, "rank")
-    rank_factors = factors.copy()
-    rank_factors["CARRY"] = rank_carry["C5"]
-    rank_factors.to_csv(output / "monthly_factor_returns_rank_diagnostic.csv")
+    rank_factors = factors
+    rank_combined_expanded = pd.concat([assets, rank_factors], axis=1).dropna()
+    rank_assets_expanded = rank_combined_expanded[TEST_ASSETS]
+    rank_factors_expanded = rank_combined_expanded[FACTORS]
+
+    equity_path = ROOT / "data/processed/equity_volatility_monthly.parquet"
+    if not equity_path.exists():
+        from .auxiliary import prepare_equities
+
+        prepare_equities()
+    table8_results = table8_equity_volatility_results(
+        assets,
+        rank_factors,
+        rank_carry,
+        pd.read_parquet(equity_path),
+    )
+    table8_output = REPLICATION_TABLES / "equity_volatility"
+    table8_output.mkdir(parents=True, exist_ok=True)
+    table8_results["panel_a"].to_csv(
+        table8_output / "table8_panel_a_time_series.csv", index=False
+    )
+    table8_results["panel_a_sample"].to_csv(
+        table8_exploration_output / "table8_panel_a_common_sample.csv"
+    )
+    table8_results["panel_b_model"].to_csv(
+        table8_output / "table8_panel_b_cross_sectional_model.csv", index=False
+    )
+    table8_results["panel_b_pricing"].to_csv(
+        table8_output / "table8_panel_b_pricing_errors.csv", index=False
+    )
+    table8_results["panel_b_sample"].to_csv(
+        table8_exploration_output / "table8_panel_b_common_sample.csv"
+    )
+    table8_results["sample_coverage"].to_csv(
+        table8_output / "table8_sample_and_country_coverage.csv", index=False
+    )
 
     coverage = pd.concat(
         [coverage_table(assets, "test_asset"), coverage_table(factors, "factor")],
         ignore_index=True,
     )
-    coverage.to_csv(output / "portfolio_and_factor_coverage.csv", index=False)
+    coverage.to_csv(
+        exploration_output / "portfolio_and_factor_coverage.csv", index=False
+    )
 
     combined = pd.concat([assets, factors], axis=1).dropna()
     common_assets = combined[TEST_ASSETS]
     common_factors = combined[FACTORS]
-    combined.to_csv(output / "common_regression_sample_strict_sign.csv")
+    combined.to_csv(exploration_output / "common_regression_sample.csv")
     pd.DataFrame(
         [
             {
-                "specification": "strict_sign_primary",
+                "specification": "unconditional_rank_bottom_top_5",
                 "start": combined.index.min(),
                 "end": combined.index.max(),
                 "months": len(combined),
@@ -753,27 +1019,35 @@ def build_asset_pricing_replication(folder=None) -> dict[str, pd.DataFrame]:
     parameter_frame.to_csv(output / "table3_parameter_estimates.csv", index=False)
     fit_frame.to_csv(output / "table3_model_fit_and_tests.csv", index=False)
     pd.concat(time_series_frames, ignore_index=True).to_csv(
-        output / "time_series_betas.csv", index=False
+        exploration_output / "time_series_betas.csv", index=False
     )
+    table6, table6_joint = time_series_table(
+        rank_assets_expanded, rank_factors_expanded[FACTORS], "three_factor"
+    )
+    table7_two_factor, table7_two_factor_joint = time_series_table(
+        rank_assets_expanded,
+        rank_factors_expanded[["AVG", "CARRY"]],
+        "omit_momentum",
+    )
+    table7_carry_only, table7_carry_only_joint = time_series_table(
+        rank_assets_expanded, rank_factors_expanded[["CARRY"]], "carry_only"
+    )
+    for frame in [table6, table6_joint, table7_two_factor, table7_two_factor_joint,
+                  table7_carry_only, table7_carry_only_joint]:
+        frame.insert(0, "carry_policy", "unconditional_rank_bottom_top_5")
+    table6.to_csv(diagnostic_output / "table6_time_series_three_factor.csv", index=False)
+    table6_joint.to_csv(diagnostic_output / "table6_joint_alpha_test.csv", index=False)
+    pd.concat([table7_two_factor, table7_carry_only], ignore_index=True).to_csv(
+        diagnostic_output / "table7_time_series_restricted_models.csv", index=False
+    )
+    pd.concat(
+        [table7_two_factor_joint, table7_carry_only_joint], ignore_index=True
+    ).to_csv(diagnostic_output / "table7_joint_alpha_tests.csv", index=False)
     pricing_frame = pd.DataFrame(pricing_rows)
     pricing_frame.to_csv(output / "realized_fitted_and_pricing_errors.csv", index=False)
     _published_comparison(parameter_frame, fit_frame).to_csv(
         output / "table3_published_vs_reconstructed.csv", index=False
     )
-
-    rank_common = pd.concat([assets, rank_factors], axis=1).reindex(combined.index).dropna()
-    rank_fmb = fama_macbeth(rank_common[TEST_ASSETS], rank_common[FACTORS])
-    sensitivity = pd.DataFrame(
-        {
-            "factor": FACTORS,
-            "strict_lambda_monthly": fmb_results["three_factor"].lambda_estimate,
-            "rank_lambda_monthly": rank_fmb.lambda_estimate,
-        }
-    )
-    sensitivity["difference_monthly"] = (
-        sensitivity.rank_lambda_monthly - sensitivity.strict_lambda_monthly
-    )
-    sensitivity.to_csv(output / "strict_vs_rank_common_sample.csv", index=False)
 
     primary_pricing = pricing_frame[pricing_frame.model.eq("three_factor")]
     primary_mae = primary_pricing.pricing_error_annualized_percent.abs().mean()
@@ -797,108 +1071,12 @@ def build_asset_pricing_replication(folder=None) -> dict[str, pd.DataFrame]:
                 "gmm_j_test_is_not_hj_test": True,
             }
         ]
-    ).to_csv(output / "hj_distance_status.csv", index=False)
+    ).to_csv(exploration_output / "hj_distance_status.csv", index=False)
     _figure_two(
         common_assets,
         fmb_results["three_factor"].fitted,
-        output / "figure2_realized_vs_fitted.png",
+        figure_output / "figure2_realized_vs_fitted.png",
     )
-
-    # Requested robustness run: replace strict-sign C5 with unconditional
-    # bottom/top-five Carry and allow its larger naturally available sample.
-    # This is deliberately isolated and does not overwrite the primary result.
-    rank_output = output / "rank_carry_expanded"
-    rank_output.mkdir(parents=True, exist_ok=True)
-    rank_combined = pd.concat([assets, rank_factors], axis=1).dropna()
-    rank_assets = rank_combined[TEST_ASSETS]
-    rank_common_factors = rank_combined[FACTORS]
-    rank_combined.to_csv(rank_output / "common_regression_sample.csv")
-    pd.DataFrame(
-        [
-            {
-                "specification": "rank_carry_expanded_diagnostic",
-                "start": rank_combined.index.min(),
-                "end": rank_combined.index.max(),
-                "months": len(rank_combined),
-                "calendar_months_paper": 501,
-                "nw_lags": automatic_nw_lags(len(rank_combined)),
-            }
-        ]
-    ).to_csv(rank_output / "common_sample_summary.csv", index=False)
-
-    rank_parameter_rows = []
-    rank_fit_rows = []
-    rank_pricing_rows = []
-    rank_time_series_frames = []
-    rank_fmb_results = {}
-    for name, factor_names in models.items():
-        selected_factors = rank_common_factors[factor_names]
-        fmb = fama_macbeth(rank_assets, selected_factors)
-        one_step, two_step = estimate_gmm(rank_assets, selected_factors)
-        rank_fmb_results[name] = fmb
-        rank_parameter_rows.extend(_model_rows(name, fmb, one_step, two_step))
-        fit = _fit_rows(name, fmb, one_step, two_step)
-        fit["n_months"] = len(rank_combined)
-        rank_fit_rows.append(fit)
-        rank_time_series_frames.append(
-            time_series_regressions(rank_assets, selected_factors, name)
-        )
-        for asset_index, asset in enumerate(TEST_ASSETS):
-            rank_pricing_rows.append(
-                {
-                    "model": name,
-                    "asset": asset,
-                    "realized_monthly": rank_assets[asset].mean(),
-                    "fitted_monthly": fmb.fitted[asset_index],
-                    "pricing_error_monthly": fmb.pricing_errors[asset_index],
-                    "realized_annualized_percent": rank_assets[asset].mean() * 1200,
-                    "fitted_annualized_percent": fmb.fitted[asset_index] * 1200,
-                    "pricing_error_annualized_percent": fmb.pricing_errors[asset_index] * 1200,
-                }
-            )
-    rank_parameter_frame = pd.DataFrame(rank_parameter_rows)
-    rank_fit_frame = pd.DataFrame(rank_fit_rows)
-    rank_pricing_frame = pd.DataFrame(rank_pricing_rows)
-    rank_parameter_frame.to_csv(rank_output / "table3_parameter_estimates.csv", index=False)
-    rank_fit_frame.to_csv(rank_output / "table3_model_fit_and_tests.csv", index=False)
-    rank_pricing_frame.to_csv(
-        rank_output / "realized_fitted_and_pricing_errors.csv", index=False
-    )
-    pd.concat(rank_time_series_frames, ignore_index=True).to_csv(
-        rank_output / "time_series_betas.csv", index=False
-    )
-    _published_comparison(rank_parameter_frame, rank_fit_frame).to_csv(
-        rank_output / "table3_published_vs_reconstructed.csv", index=False
-    )
-    rank_primary_pricing = rank_pricing_frame[rank_pricing_frame.model.eq("three_factor")]
-    pd.DataFrame(
-        [
-            {
-                "model": "three_factor_rank_carry_expanded",
-                "annualized_mae_percent": (
-                    rank_primary_pricing.pricing_error_annualized_percent.abs().mean()
-                ),
-                "published_figure2_annualized_mae_percent": 1.84,
-            }
-        ]
-    ).to_csv(rank_output / "figure2_fit_summary.csv", index=False)
-    _figure_two(
-        rank_assets,
-        rank_fmb_results["three_factor"].fitted,
-        rank_output / "figure2_realized_vs_fitted.png",
-    )
-    pd.DataFrame(
-        [
-            {
-                "status": "not_implemented",
-                "reason": (
-                    "HJ distance and p-value withheld until the nonstandard "
-                    "boundary-null weighted-chi-square inference is independently validated"
-                ),
-                "gmm_j_test_is_not_hj_test": True,
-            }
-        ]
-    ).to_csv(rank_output / "hj_distance_status.csv", index=False)
     return {
         "assets": assets,
         "factors": factors,

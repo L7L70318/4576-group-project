@@ -7,12 +7,23 @@ import pandas as pd
 from .paths import ROOT, load_config
 
 
+def reference_path() -> Path | None:
+    """Return the optional authors' TSV benchmark when locally available."""
+    candidates = [
+        ROOT / "data/raw/paper_reference/FuturesReturn_to_post.xls",
+        ROOT / "FuturesReturn_to_post.xls",
+    ]
+    return next((path for path in candidates if path.exists()), None)
+
+
 def load_reference():
-    candidates = [ROOT / 'data/raw/paper_reference/FuturesReturn_to_post.xls',
-                  ROOT / 'FuturesReturn_to_post.xls']
-    path = next(p for p in candidates if p.exists())
+    path = reference_path()
+    if path is None:
+        raise FileNotFoundError(
+            "Optional author benchmark FuturesReturn_to_post.xls is not available"
+        )
     d = pd.read_csv(path, sep='\t')
-    d['date'] = pd.to_datetime(dict(year=d.Year, month=d.Month, day=1)) + pd.offsets.MonthEnd(0)
+    d['date'] = pd.to_datetime({"year": d.Year, "month": d.Month, "day": 1}) + pd.offsets.MonthEnd(0)
     d = d.rename(columns={'Contract':'paper_code','Exc_Ret':'excess_return',
                           'Log_Future_Spot_Ratio':'slope'})
     assert not d.duplicated(['paper_code','date']).any()
@@ -90,9 +101,9 @@ def monthly_snapshots(folder, prefer_actual_notice=True):
         d = pd.read_parquet(path).drop_duplicates()
         d['date'] = pd.to_datetime(d.date)
         conflict = d.duplicated(['futcode','date'],keep=False)
-        audits.append(dict(contrcode=code,raw_rows=len(d),conflict_rows=int(conflict.sum()),
-                           nonpositive_prices=int(d.settlement.le(0).sum()),
-                           missing_prices=int(d.settlement.isna().sum())))
+        audits.append({"contrcode": code,"raw_rows": len(d),"conflict_rows": int(conflict.sum()),
+                           "nonpositive_prices": int(d.settlement.le(0).sum()),
+                           "missing_prices": int(d.settlement.isna().sum())})
         d = d.loc[~conflict].copy()
         d['month'] = d.date + pd.offsets.MonthEnd(0)
         d = d[d.date.eq(d.groupby('month').date.transform('max'))]
@@ -120,11 +131,11 @@ def construct_monthly(snapshot, max_quote_age=None):
         if q.maturity.duplicated().any():
             raise ValueError(f'Multiple contracts for delivery month: {code} {date}')
         base = quotes.iloc[0]
-        row = dict(paper_code=base.paper_code,commodity=base.commodity,sector=base.sector,
-                   contrcode=int(code),priority=base.priority,mapping_status=base.status,
-                   formation_date=date,date=date+pd.offsets.MonthEnd(1),
-                   selected_futcode=np.nan,entry_price=np.nan,slope=np.nan,
-                   reason='insufficient_curve',notice_source='unresolved')
+        row = {"paper_code": base.paper_code,"commodity": base.commodity,"sector": base.sector,
+                   "contrcode": int(code),"priority": base.priority,"mapping_status": base.status,
+                   "formation_date": date,"date": date+pd.offsets.MonthEnd(1),
+                   "selected_futcode": np.nan,"entry_price": np.nan,"slope": np.nan,
+                   "reason": 'insufficient_curve',"notice_source": 'unresolved'}
         if len(q)>=2:
             front, second = q.iloc[0], q.iloc[1]
             row.update(front_futcode=int(front.futcode), second_futcode=int(second.futcode),
@@ -194,5 +205,8 @@ def build_dataset(folder=None):
     panel.to_parquet(processed/'commodity_monthly.parquet',index=False,compression='zstd')
     panel[panel.date.between('2000-01-01','2025-12-31')].to_parquet(
         processed/'commodity_monthly_2000_2025.parquet',index=False,compression='zstd')
-    load_reference().to_parquet(out/'author_monthly_reference.parquet',index=False,compression='zstd')
+    if reference_path() is not None:
+        load_reference().to_parquet(
+            out/'author_monthly_reference.parquet', index=False, compression='zstd'
+        )
     return panel

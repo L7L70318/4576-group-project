@@ -1,11 +1,11 @@
 """Public auxiliary snapshots; no undisclosed substitution for the G20 proxy."""
-import io
-import json
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
 import pandas as pd
-from .paths import ROOT
+
 from .acquisition import record
+from .paths import ROOT
 
 
 def download_equities(conn,start='1969-01-01',end='2025-12-31'):
@@ -32,7 +32,10 @@ def download_equities(conn,start='1969-01-01',end='2025-12-31'):
 def prepare_equities():
     import numpy as np
     mapping=pd.read_csv(ROOT/'configs/equity_map.csv')
-    raw=ROOT/'data/raw/equity_indices'; frames=[]
+    raw=ROOT/'data/raw/equity_indices'
+    processed=ROOT/'data/processed'; processed.mkdir(parents=True,exist_ok=True)
+    interim=ROOT/'data/interim'; interim.mkdir(parents=True,exist_ok=True)
+    frames=[]
     for row in mapping.itertuples():
         d=pd.read_parquet(raw/f'{row.dsindexmnem}.parquet').drop_duplicates()
         d['pi_']=pd.to_numeric(d.pi_,errors='coerce').astype('float64')
@@ -42,7 +45,7 @@ def prepare_equities():
         d.loc[d.valuedate.diff().dt.days.gt(7) | d.pi_.le(0),'return']=np.nan
         frames.append(d)
     d=pd.concat(frames,ignore_index=True)
-    d.to_parquet(ROOT/'data/processed/equity_country_daily.parquet',index=False)
+    d.to_parquet(processed/'equity_country_daily.parquet',index=False)
     d['abs_return']=d['return'].abs()
     daily=d.groupby('valuedate').agg(avg_abs_return=('abs_return','mean'),
                   countries=('return','count'),equal_weight_return=('return','mean'))
@@ -52,9 +55,9 @@ def prepare_equities():
         vol_proposal_ew_proxy=('equal_weight_return',lambda x:np.sqrt((x**2).sum(min_count=1))))
     monthly['delta_vol_equity_g20_proxy']=monthly.vol_equity_g20_proxy.diff()
     monthly['delta_vol_proposal_ew_proxy']=monthly.vol_proposal_ew_proxy.diff()
-    monthly.rename_axis('date').to_parquet(ROOT/'data/processed/equity_volatility_monthly.parquet')
+    monthly.rename_axis('date').to_parquet(processed/'equity_volatility_monthly.parquet')
     d.groupby('country').agg(start=('valuedate','min'),end=('valuedate','max'),
-        returns=('return','count')).to_csv(ROOT/'data/interim/equity_coverage.csv')
+        returns=('return','count')).to_csv(interim/'equity_coverage.csv')
     return monthly
 
 
@@ -75,7 +78,7 @@ def download_public(start_year=1999,end_year=2025):
     status=[]
     jobs=[('vix','https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv',out/'vix.csv')]
     for series in ['USREC','INDPRO','DTWEXBGS','TEDRATE','TB3MS','BAA','AAA']:
-        jobs.append((series,f'https://fred.stlouisfed.org/graph/?'+urlencode({'g':'','id':series,'cosd':'1969-01-01','coed':'2025-12-31'})+'&mode=fred',out/f'{series}.csv'))
+        jobs.append((series,'https://fred.stlouisfed.org/graph/?'+urlencode({'g':'','id':series,'cosd':'1969-01-01','coed':'2025-12-31'})+'&mode=fred',out/f'{series}.csv'))
     # Use FRED's CSV endpoint rather than graph HTML.
     jobs=[(name, url.replace('/graph/?','/graph/fredgraph.csv?'),path) for name,url,path in jobs]
     fields=['market_and_exchange_names','report_date_as_yyyy_mm_dd','cftc_contract_market_code',
@@ -91,10 +94,11 @@ def download_public(start_year=1999,end_year=2025):
             d=pd.read_csv(path)
             if name.startswith('cot_') and len(d)>=50000:
                 raise ValueError('Pagination cap hit; refusing truncated COT archive')
-            status.append(dict(dataset=name,status='downloaded',rows=len(d)))
+            status.append({'dataset': name,'status': 'downloaded','rows': len(d)})
             print(name,len(d),flush=True)
-        except Exception as e:
-            status.append(dict(dataset=name,status='failed',error=f'{type(e).__name__}: {e}'))
+        # Keep independent successful snapshots when one public endpoint fails.
+        except Exception as e:  # noqa: BLE001
+            status.append({'dataset': name,'status': 'failed','error': f'{type(e).__name__}: {e}'})
             print(name,'failed',type(e).__name__,flush=True)
     pd.DataFrame(status).to_csv(out/'download_status.csv',index=False)
     return pd.DataFrame(status)
