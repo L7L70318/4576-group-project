@@ -5,3 +5,5 @@
 - `equity_volatility_replication.md`: Carry and global equity-volatility reconstruction.
 - `replication_map.csv`: paper-result to output mapping.
 - `slides.md`: concise presentation outline for the Phase 1 submission.
+- `../results/extension/README.md`: extension design, findings, caveats, and
+  result map.

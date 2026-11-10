@@ -1,0 +1,5 @@
+sample,asset_design,n_months,annualized_mae_percent,annualized_max_abs_error_percent,realized_fitted_correlation
+paper_sample_paired,original_sign_split,427,1.804302677789687,3.6975380425906224,0.9285643871422508
+paper_sample_paired,full_slope_quartiles,427,1.4527137171042936,3.1482856181991523,0.9510026949872511
+extended_sample_paired,original_sign_split,597,1.3987869265557609,2.821259109865246,0.9352038087143844
+extended_sample_paired,full_slope_quartiles,597,1.1314579233173256,2.4942487841115364,0.9603080058932385

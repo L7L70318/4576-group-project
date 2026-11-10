@@ -1,0 +1,13 @@
+sample,asset_design,model,n_months,nw_lags,joint_alpha_chi2,joint_alpha_df,joint_alpha_pvalue,bootstrap_pvalue,bootstrap_critical_95,bootstrap_draws
+paper_sample_paired,original_sign_split,three_factor,427,5,27.353383830601768,12,0.006870680374090823,0.076,30.71601386055626,499
+paper_sample_paired,original_sign_split,omit_momentum,427,5,34.10686626589488,12,0.0006488552480034329,0.026,29.056548488732243,499
+paper_sample_paired,original_sign_split,carry_only,427,5,35.88976098901995,12,0.00033747859154861743,0.026,30.023824175064604,499
+paper_sample_paired,full_slope_quartiles,three_factor,427,5,26.69806123814626,12,0.008538453138312444,0.114,31.11164320132712,499
+paper_sample_paired,full_slope_quartiles,omit_momentum,427,5,34.29478920968128,12,0.0006059743817382142,0.03,29.95025190048587,499
+paper_sample_paired,full_slope_quartiles,carry_only,427,5,37.13677365814851,12,0.00021227858756786948,0.01,29.31561884416429,499
+extended_sample_paired,original_sign_split,three_factor,597,5,16.355532677898907,12,0.17548922104325765,0.3,24.584819777071694,499
+extended_sample_paired,original_sign_split,omit_momentum,597,5,24.862656742223024,12,0.015487278096979166,0.062,25.258297007454082,499
+extended_sample_paired,original_sign_split,carry_only,597,5,26.642930368515174,12,0.008695045104185258,0.056,27.41427122917884,499
+extended_sample_paired,full_slope_quartiles,three_factor,597,5,17.512722105153287,12,0.13130678960386002,0.2,24.096830192411478,499
+extended_sample_paired,full_slope_quartiles,omit_momentum,597,5,23.94627309595009,12,0.020685981216209216,0.094,27.30336128236864,499
+extended_sample_paired,full_slope_quartiles,carry_only,597,5,25.573428150203316,12,0.012327495692265909,0.05,25.397658222325536,499

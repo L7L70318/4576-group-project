@@ -1,6 +1,6 @@
 # Data coverage and research assumptions are documented in report/data_methodology.md.
 project:
-  phase: replication
+  phase: replication_and_extension
   seed: 4576
 sample:
   download_start: "1969-01-01"
@@ -25,6 +25,15 @@ estimation:
   gmm_weighting: identity
   hac_lag_selection: newey_west_1994
   bootstrap_iterations: 10000
+extension:
+  rolling_windows_months: [120, 180]
+  rolling_step_months: 12
+  block_length_months: 12
+  local_bootstrap_draws: 199
+  main_bootstrap_draws: 499
+  break_bootstrap_draws: 999
+  vix_primary_threshold: paper_sample_median
+  robust_carry_test_assets: full_slope_quartiles
 paths:
   raw: data/raw
   interim: data/interim

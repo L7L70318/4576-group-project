@@ -1,0 +1,5 @@
+period,portfolio,months,mean_members,median_members,minimum_members,maximum_members,months_with_at_most_2_members,share_months_with_at_most_2_members
+full,P1,631,3.7908082408874804,4.0,1,9,166,0.2630744849445325
+full,P2,622,3.3440514469453375,3.0,1,8,215,0.34565916398713825
+rejection_region_2003_2014,P1,144,3.2916666666666665,3.0,1,7,55,0.3819444444444444
+rejection_region_2003_2014,P2,143,2.839160839160839,3.0,1,7,69,0.4825174825174825

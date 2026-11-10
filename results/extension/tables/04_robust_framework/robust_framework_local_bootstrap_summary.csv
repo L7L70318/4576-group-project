@@ -1,0 +1,5 @@
+window_months,model,windows,asymptotic_rejections,bootstrap_rejections,mean_local_null_size,median_bootstrap_pvalue,mean_bootstrap_critical
+120,full_slope_quartiles,40,2,0,0.275251256281407,0.6174999999999999,36.45364325754988
+120,original_sign_split,40,21,5,0.25690954773869346,0.31,33.961751487847266
+180,full_slope_quartiles,35,2,0,0.17114142139267768,0.475,25.181578141861316
+180,original_sign_split,35,15,8,0.16927494615936822,0.225,25.517515486760075

@@ -4,6 +4,8 @@ results/*
 !results/README.md
 !results/replication/
 !results/replication/**
+!results/extension/
+!results/extension/**
 tmp/
 processing_exploration/
 .env

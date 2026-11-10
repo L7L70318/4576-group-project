@@ -1,0 +1,20 @@
+{
+  "sample_months": 597,
+  "sample_start": "1974-08-31",
+  "sample_end": "2025-12-31",
+  "full_sample_gmm_j_pvalue": 0.4904257546294428,
+  "sup_wald_statistic": 31.552810787063407,
+  "sup_wald_covariance_rank": 12,
+  "sup_wald_last_month_before_break": "1985-10-31",
+  "sup_wald_first_month_after_break": "1985-11-30",
+  "sup_wald_bootstrap_pvalue": 0.146,
+  "sup_wald_bootstrap_95_critical": 36.71657304971264,
+  "sup_wald_candidate_step_complete_months": 12,
+  "sup_wald_trim_fraction": 0.15,
+  "bootstrap_draws": 999,
+  "bootstrap_block_months": 12,
+  "bai_perron_selected_break_count": 0,
+  "bai_perron_selected_first_months": "",
+  "bai_perron_minimum_segment_months": 60,
+  "inference_caveat": "Break tests use pricing moments from the fixed full-sample SDF; the sup-Wald block bootstrap imposes a constant mean but does not re-estimate SDF nuisance parameters in each draw."
+}

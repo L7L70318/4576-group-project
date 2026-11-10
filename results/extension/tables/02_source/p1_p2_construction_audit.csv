@@ -1,0 +1,9 @@
+check,violations,observations_checked,passed
+P1/P2 member slopes are strictly negative,0,4472,True
+P1/P2 memberships do not overlap,0,631,True
+P1 is below P2 in the negative-slope ranking,0,622,True
+member counts equal the two-way negative-slope split,0,1253,True
+portfolio weights are equal and sum to one,0,1253,True
+portfolio return equals weighted constituent return,0,1253,True
+constituent return equals exit/entry minus one,0,4468,True
+return month is one month after formation month,0,4472,True

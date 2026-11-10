@@ -1,0 +1,5 @@
+sample,asset_design,months,start,end,vix_median,fixed_paper_vix_median
+paper_sample_paired,original_sign_split,251,1990-02-28,2011-09-30,19.31,19.31
+paper_sample_paired,full_slope_quartiles,251,1990-02-28,2011-09-30,19.31,19.31
+extended_sample_paired,original_sign_split,421,1990-02-28,2025-12-31,17.4,19.31
+extended_sample_paired,full_slope_quartiles,421,1990-02-28,2025-12-31,17.4,19.31

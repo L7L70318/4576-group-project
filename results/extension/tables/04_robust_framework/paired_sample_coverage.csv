@@ -1,0 +1,5 @@
+sample,asset_design,start,end,months,test_assets
+paper_sample_paired,original_sign_split,1974-08-31,2011-09-30,427,12
+paper_sample_paired,full_slope_quartiles,1974-08-31,2011-09-30,427,12
+extended_sample_paired,original_sign_split,1974-08-31,2025-12-31,597,12
+extended_sample_paired,full_slope_quartiles,1974-08-31,2025-12-31,597,12
